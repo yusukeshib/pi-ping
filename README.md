@@ -1,44 +1,52 @@
 # pi-ping
 
-Piがidleになったとき、一定間隔で自動wake-upメッセージを送り、エージェントの次のターンを開始する拡張です。初期状態は **OFF**、既定間隔は **5分**。
+An opt-in Pi extension that sends periodic wake-up messages when the agent is idle, starting another agent turn. **Disabled by default**, with a **5-minute** default interval.
 
-## インストール
+## Installation
+
+After the package is published:
 
 ```sh
-pi install /Users/yusuke/projects/pi-ping
+pi install npm:@yusukeshib/pi-ping
 ```
 
-Piで `/reload` を実行してから使ってください。Pi 0.99.2で動作確認済みです。
+For local development, install the checkout instead:
 
-## コマンド
+```sh
+pi install /path/to/pi-ping
+```
 
-| コマンド | 動作 |
+Run `/reload` in Pi after installation. Tested with Pi 0.99.2.
+
+## Commands
+
+| Command | Behavior |
 | --- | --- |
-| `/ping enable` | 5分間隔で有効化（変更済みなら現在の間隔を使用） |
-| `/ping enable 2m` | 2分間隔で有効化 |
-| `/ping interval 30s` | 間隔変更。有効／無効は変えない |
-| `/ping disable` | 即座に無効化、タイマーを解除 |
-| `/ping status` または `/ping` | 状態・間隔・次のチェックまでの時間を表示 |
+| `/ping enable` | Enable with the current interval (initially 5 minutes) |
+| `/ping enable 2m` | Enable with a 2-minute interval |
+| `/ping interval 30s` | Change the interval without enabling or disabling |
+| `/ping disable` | Disable immediately and cancel the timer |
+| `/ping status` or `/ping` | Show status, interval, and time until the next check |
 
-時間は `s`（秒）、`m`（分）、`h`（時間）。単位なしの `5` は5分です。`0.5m` も使えます。範囲は1秒〜24時間（通常は5分程度を推奨）。
+Durations accept `s` (seconds), `m` (minutes), and `h` (hours). Bare numbers are minutes: `5` means 5 minutes. Fractional values such as `0.5m` work too. The range is 1 second to 24 hours; 5 minutes is recommended for normal use.
 
-## 挙動
+## Behavior
 
-- 有効化した時点、または処理が完全に終了した `agent_settled` から、指定間隔を待って送信します。単なる `agent_end` では送らないので、Pi自身のリトライや自動compactionに割り込みません。
-- 実行中・待機メッセージあり・拡張の確認ダイアログ表示中・TUI入力欄に下書きがある場合は送りません。次の間隔で再確認します。
-- wake-upはユーザーの発言を偽装せず、`pi-ping` のカスタムメッセージとして会話に表示されます。未完了の許可済み作業の続行や一時的な通信エラー後の再試行を促します。完了済み処理の繰り返し・承認の迂回・新しい作業の創作は指示しません。
-- タイマーは最大1個。実行開始時に解除し、処理終了後に再設定します。無効化・終了・セッション切替・reload時に旧タイマーを解除します。
-- ON/OFFと間隔はセッションのアクティブブランチに保存します。resume、reload、保存状態を引き継ぐforkでは復元します。新しいセッションはOFFです。`/tree`で移動すると移動先ブランチの設定に戻ります。
+- Waits a full interval after enabling or after `agent_settled`, when Pi has finished all automatic work. It does not wake on `agent_end`, so it does not interrupt Pi's built-in retries or automatic compaction.
+- Does not send while the agent is busy, messages are queued, an extension dialog is open, or the TUI editor contains a draft. Checks again after another interval.
+- Displays a distinct `pi-ping` custom message rather than impersonating user input. The message asks the agent to continue unfinished authorized work or retry after a transient network failure. It explicitly discourages inventing work, repeating completed side effects, bypassing approvals, or ignoring a request to stop.
+- Uses at most one timer. Cancels it when a run starts and restarts it after settlement. Disable, shutdown, session replacement, and reload clean up the old timer.
+- Saves enabled state and interval on the session's active branch. Resume, reload, and forks that inherit the saved state restore those settings. New sessions start disabled. Navigating with `/tree` restores the destination branch's settings.
 
-## 注意
+## Important limitations
 
-**ONの間は、作業が完了していても、Escで中断した後でも、自動でモデル呼び出しが発生します。トークン使用・料金が増える可能性があります。止めるときは `/ping disable`。**
+**While enabled, pi-ping starts model turns even after work is complete or after an Esc interruption. This can consume tokens and incur charges. Use `/ping disable` to stop it.**
 
-ネット接続を復旧する機能ではありません。通信エラーでPiの処理が終了しidleに戻った場合に、次のモデル呼び出しを試みます。ネットが切れたままなら再び失敗し、その処理が終了した後に次の間隔で試行します。
+This extension does not restore network connectivity. If a network failure ends Pi's run and leaves it idle, the extension attempts another model turn after the configured interval. If the network is still unavailable, that turn can fail again; another check follows after the failed run settles.
 
-Piプロセスの終了、OSのスリープ、イベントループの停止、idleに戻らないハングは復旧できません。ハングした処理を強制中断するwatchdogではありません。モデルが実際に作業を再開できるかは会話・権限・接続状態によります。
+It cannot recover an exited Pi process, wake a sleeping operating system, unblock a frozen event loop, or interrupt a hung run that never returns to idle. It is not a watchdog that forcibly aborts operations. Whether work actually resumes depends on the conversation, permissions, model, and connectivity.
 
-## 開発・検証
+## Development and validation
 
 ```sh
 npm ci --ignore-scripts
@@ -47,12 +55,25 @@ npm run smoke
 npm pack --dry-run
 ```
 
-`check` はTypeScript型チェック＋10件のfake-timerテスト。`smoke` はインストール済みの `pi` とPython 3を使い、隔離した設定・セッションで実際のRPCライフサイクルを検証します。ローカル模擬プロバイダを2回呼び出し、通信エラー→wake-up→成功→disableを確認します。外部モデル呼び出し・API費用はありません。実ネットワーク障害や実モデルでの長時間継続は未検証です。
+`check` runs TypeScript checks and 10 fake-timer tests. `smoke` requires an installed `pi` command and Python 3. It runs Pi's actual RPC lifecycle with isolated settings and a deterministic local provider, verifying simulated network failure, wake-up, recovery, and disable. It makes two local mock calls, no external model calls, and incurs no API charges. Actual network outages and long-running real-model continuation have not been tested.
 
-## アンインストール
+## Publishing to npm
+
+The initial release is **0.1.0**. Do not bump the version before the first publication.
 
 ```sh
-pi remove /Users/yusuke/projects/pi-ping
+npm run release:dry-run
+npm run release
 ```
 
-その後 `/reload`。
+`release` publishes to npm. The `prepublishOnly` hook runs type checks and tests first. `publishConfig` selects the official npm registry and public access. Follow npm's CLI instructions if authentication or two-factor verification is required. Run `npm run smoke` separately before publishing when needed.
+
+Only `extensions/`, `README.md`, `LICENSE`, and `package.json` are included in the package. After the initial publication, subsequent releases require a new version: npm does not allow republishing the same version.
+
+## Uninstallation
+
+```sh
+pi remove npm:@yusukeshib/pi-ping
+```
+
+For a local checkout, use `pi remove /path/to/pi-ping` instead. Then run `/reload`.

@@ -4,6 +4,7 @@
   "description": "Opt-in periodic wake-up messages for idle Pi sessions.",
   "type": "module",
   "license": "MIT",
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "keywords": ["pi-package", "pi-extension"],
   "repository": { "type": "git", "url": "git+https://github.com/yusukeshib/pi-ping.git" },
   "files": ["extensions/", "README.md", "LICENSE"],
@@ -12,7 +13,10 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
-    "smoke": "python3 tests/rpc-smoke.py"
+    "smoke": "python3 tests/rpc-smoke.py",
+    "prepublishOnly": "npm run check",
+    "release:dry-run": "npm publish --dry-run",
+    "release": "npm publish"
   },
   "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
   "devDependencies": {
